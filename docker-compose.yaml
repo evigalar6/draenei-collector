@@ -1,0 +1,69 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  scheduler:
+    build: .
+    command: airflow scheduler
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      # Ключі AWS беруться з .env
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./plugins:/opt/airflow/plugins
+      - ./logs:/opt/airflow/logs
+
+  webserver:
+    build: .
+    command: airflow webserver
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *airflow-common-env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./plugins:/opt/airflow/plugins
+      - ./logs:/opt/airflow/logs
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  airflow-init:
+    build: .
+    environment: *airflow-common-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Виправлено: залишаємо тільки одну команду ініціалізації
+    command: >
+      bash -c "airflow db migrate && airflow users create --username admin --firstname Peter --lastname Parker --role Admin --email spiderman@superhero.org --password admin"
+
+volumes:
+  postgres-db-volume:

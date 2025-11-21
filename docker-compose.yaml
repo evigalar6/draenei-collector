@@ -6,8 +6,10 @@ services:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
       - POSTGRES_DB=airflow
+    ports:
+      - "5435:5432"                 # Порт змінено на 5435
     volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+      - postgres-db-v2:/var/lib/postgresql/data  # Том змінено на v2
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
@@ -26,10 +28,10 @@ services:
       AIRFLOW__CORE__FERNET_KEY: ''
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-      # Ключі AWS беруться з .env
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: us-east-1
+      BUCKET_NAME: ${BUCKET_NAME}
     volumes:
       - ./dags:/opt/airflow/dags
       - ./plugins:/opt/airflow/plugins
@@ -61,9 +63,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Виправлено: залишаємо тільки одну команду ініціалізації
     command: >
       bash -c "airflow db migrate && airflow users create --username admin --firstname Peter --lastname Parker --role Admin --email spiderman@superhero.org --password admin"
 
 volumes:
-  postgres-db-volume:
+  postgres-db-v2:    # Тут ми оголошуємо том v2, щоб він збігався з тим, що в сервісі postgres

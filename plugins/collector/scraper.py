@@ -1,8 +1,9 @@
 import requests
 from typing import List, Dict, Any
+import random
 
 
-def scrape_draenei_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> List[Dict[str, Any]]:
+def scrape_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> List[Dict[str, Any]]:
     """
     Searches the images and returns dicts with params.
     """
@@ -50,8 +51,19 @@ def scrape_draenei_metadata(query: str = "draenei", limit: int = 10, page: int =
         return []
 
 
+def scrape_random_batch(**kwargs):
+    """
+    Обгортка для Airflow: обирає випадкову сторінку і запускає скрапінг.
+    """
+    # 1 або 2 сторінка (бо їх всього мало)
+    random_page = random.randint(1, 2)
+    print(f"🎲 Тягнемо сторінку №{random_page}")
+
+    return scrape_metadata(query="draenei", limit=5, page=random_page)
+
+
 if __name__ == "__main__":
     # Тест
-    data = scrape_draenei_metadata(limit=3)
+    data = scrape_metadata(limit=3)
     for img in data:
         print(img)

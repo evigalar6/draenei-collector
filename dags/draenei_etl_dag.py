@@ -8,12 +8,6 @@ from collector.scraper import scrape_random_batch
 from collector.db_loader import load_metadata_to_db
 from uploader.pipeline import download_and_upload_images
 
-doc_md_DAG = """
-
-
-<img src="/include/my_image.png" alt="My Image" width="500"/> 
-"""
-
 # --- Налаштування ---
 default_args = {
     'owner': 'evi',

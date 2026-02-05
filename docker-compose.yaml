@@ -7,9 +7,9 @@ services:
       - POSTGRES_PASSWORD=airflow
       - POSTGRES_DB=airflow
     ports:
-      - "5435:5432"                 # Порт змінено на 5435
+      - "5435:5432"                 # Map Postgres to 5435 to avoid local conflicts.
     volumes:
-      - postgres-db-v2:/var/lib/postgresql/data  # Том змінено на v2
+      - postgres-db-v2:/var/lib/postgresql/data  # Use a versioned volume name.
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
@@ -67,4 +67,4 @@ services:
       bash -c "airflow db migrate && airflow users create --username admin --firstname Peter --lastname Parker --role Admin --email spiderman@superhero.org --password admin"
 
 volumes:
-  postgres-db-v2:    # Тут ми оголошуємо том v2, щоб він збігався з тим, що в сервісі postgres
+  postgres-db-v2:    # Declared to match the `postgres` service volume reference.

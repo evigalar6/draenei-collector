@@ -36,11 +36,11 @@ def download_and_upload_images():
         LIMIT 5;
     """)
 
-    print(f"📦 Знайдено {len(records)} незавантажених картинок.")
+    print(f"Found {len(records)} images pending upload.")
 
     for row in records:
         db_id, image_url, wall_id = row
-        print(f"⬇️ Качаю ID {db_id}: {image_url}")
+        print(f"Downloading id={db_id} url={image_url}")
 
         file_bytes = manager.download_image_as_bytes(image_url)
 
@@ -55,8 +55,8 @@ def download_and_upload_images():
                     WHERE id = %s;
                 """
                 pg_hook.run(sql_update, parameters=(s3_key, db_id))
-                print(f"✨ Базу оновлено для ID {db_id}")
+                print(f"Updated database for id={db_id}.")
             else:
-                print(f"⚠️ Не вдалося залити в S3 ID {db_id}")
+                print(f"Failed to upload to S3 for id={db_id}.")
 
         time.sleep(1)

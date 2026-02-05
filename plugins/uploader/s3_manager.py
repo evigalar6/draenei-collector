@@ -45,7 +45,7 @@ class S3Manager:
             Writes to S3 and prints status messages to stdout.
         """
         try:
-            print(f"🚀 Вивантажую файл у S3: {s3_key}...")
+            print(f"Uploading to S3: key={s3_key}")
 
             self.s3_client.put_object(Bucket=self.bucket_name,
                                       Key=s3_key,
@@ -53,14 +53,14 @@ class S3Manager:
                                       ContentType='image/jpeg',
                                       )
 
-            print(f"✅ Успішно завантажено: s3://{self.bucket_name}/{s3_key}")
+            print(f"Uploaded: s3://{self.bucket_name}/{s3_key}")
             return True
 
         except ClientError as e:
-            print(f"❌ Помилка AWS S3: {e}")
+            print(f"AWS S3 error: {e}")
             return False
         except Exception as e:
-            print(f"❌ Невідома помилка: {e}")
+            print(f"Unexpected error: {e}")
             return False
 
     def download_image_as_bytes(self, url: str) -> bytes:
@@ -80,7 +80,7 @@ class S3Manager:
             response.raise_for_status()
             return response.content
         except Exception as e:
-            print(f"❌ Не вдалося скачати файл {url}: {e}")
+            print(f"Failed to download url={url}: {e}")
             return None
 
 

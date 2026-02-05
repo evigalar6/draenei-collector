@@ -74,7 +74,7 @@ def scrape_random_batch(**kwargs):
     """
     # Keep pagination bounded to reduce API load and runtime variance.
     random_page = random.randint(1, 2)
-    print(f"🎲 Тягнемо сторінку №{random_page}")
+    print(f"Scraping page {random_page}.")
 
     return scrape_metadata(query="draenei", limit=5, page=random_page)
 

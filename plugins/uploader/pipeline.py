@@ -1,16 +1,35 @@
+"""Download images referenced in Postgres and upload them to S3."""
+
 import time
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from uploader.s3_manager import S3Manager
 
 
 def download_and_upload_images():
-    """
-    Знаходить незавантажені картинки в БД і заливає їх в S3.
+    """Upload images that have not yet been stored in S3.
+
+    Source:
+        Postgres table `draenei_content.wallpapers`, filtered by `s3_key IS NULL`.
+
+    Transform:
+        Download each URL into memory and derive a destination key using the
+        Wallhaven id and the URL extension (default: `jpg`).
+
+    Destination:
+        Upload objects to S3 and update `s3_key` and `updated_at` in Postgres.
+
+    Idempotency:
+        The query filters on `s3_key IS NULL`, so already-uploaded rows are
+        skipped on retries/reruns.
+
+    Side Effects:
+        Reads/writes Postgres, performs HTTP downloads and S3 uploads, sleeps
+        between uploads, and prints status messages to stdout.
     """
     manager = S3Manager()
     pg_hook = PostgresHook(postgres_conn_id='postgres_default')
 
-    # Ліміт 5, щоб не перевантажувати за один раз
+    # Limit batch size to keep each run bounded.
     records = pg_hook.get_records("""
         SELECT id, url, wallhaven_id FROM draenei_content.wallpapers 
         WHERE s3_key IS NULL

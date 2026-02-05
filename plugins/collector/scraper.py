@@ -1,15 +1,30 @@
+"""Scrape wallpaper metadata from the Wallhaven search API.
+
+This module fetches a small set of fields used by downstream loaders.
+"""
+
 import requests
 from typing import List, Dict, Any
 import random
 
 
 def scrape_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> List[Dict[str, Any]]:
-    """
-    Searches the images and returns dicts with params.
+    """Fetch wallpaper metadata from the Wallhaven search API.
+
+    Args:
+        query: Search query string.
+        limit: Maximum number of items to return from the API response.
+        page: 1-based page number to request.
+
+    Returns:
+        A list of metadata dicts. Returns an empty list on request/API errors.
+
+    Side Effects:
+        Prints progress and error messages to stdout.
     """
     base_url = "https://wallhaven.cc/api/v1/search"
 
-    # purity=100 (SFW), sorting=date_added
+    # Request SFW results and fetch the newest items first.
     params = {
         "q": query,
         "purity": "100",
@@ -52,10 +67,12 @@ def scrape_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> L
 
 
 def scrape_random_batch(**kwargs):
+    """Airflow entrypoint that scrapes a small, random page range.
+
+    Returns:
+        A list of metadata dicts returned by :func:`scrape_metadata`.
     """
-    Обгортка для Airflow: обирає випадкову сторінку і запускає скрапінг.
-    """
-    # 1 або 2 сторінка (бо їх всього мало)
+    # Keep pagination bounded to reduce API load and runtime variance.
     random_page = random.randint(1, 2)
     print(f"🎲 Тягнемо сторінку №{random_page}")
 
@@ -63,7 +80,7 @@ def scrape_random_batch(**kwargs):
 
 
 if __name__ == "__main__":
-    # Тест
+    # Manual smoke test.
     data = scrape_metadata(limit=3)
     for img in data:
         print(img)

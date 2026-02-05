@@ -1,11 +1,22 @@
+"""Load scraped metadata into Postgres for deduplication and downstream use."""
+
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 def load_metadata_to_db(ti):
+    """Insert scraped metadata pulled from XCom into Postgres.
+
+    This task reads metadata produced by the upstream `extract_metadata` task and
+    inserts it into `draenei_content.wallpapers`. Inserts are idempotent via
+    `ON CONFLICT (wallhaven_id) DO NOTHING`.
+
+    Args:
+        ti: Airflow TaskInstance used to pull data from XCom.
+
+    Side Effects:
+        Writes to Postgres and prints status messages to stdout.
     """
-    Отримує дані з XCom і записує їх у Postgres.
-    """
-    # Отримуємо дані з попереднього таску
+    # Pull extracted metadata from the upstream task's XCom.
     metadata_list = ti.xcom_pull(task_ids='extract_metadata')
 
     if not metadata_list:

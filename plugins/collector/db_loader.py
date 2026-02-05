@@ -20,7 +20,7 @@ def load_metadata_to_db(ti):
     metadata_list = ti.xcom_pull(task_ids='extract_metadata')
 
     if not metadata_list:
-        print("⚠️ Даних немає. Пропускаємо запис у БД.")
+        print("No metadata found; skipping database insert.")
         return
 
     pg_hook = PostgresHook(postgres_conn_id='postgres_default')
@@ -49,4 +49,4 @@ def load_metadata_to_db(ti):
     connection.commit()
     cursor.close()
     connection.close()
-    print(f"✅ Метадані оброблено: {len(rows_to_insert)} записів.")
+    print(f"Inserted metadata rows: {len(rows_to_insert)}.")

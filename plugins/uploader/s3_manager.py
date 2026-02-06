@@ -80,7 +80,10 @@ class S3Manager:
             self.s3_client.head_object(Bucket=self.bucket_name, Key=s3_key)
             return True
         except ClientError as e:
-            code = str(e.response.get("Error", {}).get("Code", ""))
+            # Be defensive: in unusual cases `ClientError.response` may be missing/None.
+            response = getattr(e, "response", None) or {}
+            err = response.get("Error") if isinstance(response, dict) else None
+            code = str((err or {}).get("Code", ""))
             if code in {"404", "NoSuchKey", "NotFound"}:
                 return False
             raise

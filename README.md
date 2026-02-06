@@ -9,7 +9,7 @@ flowchart LR
   A[Wallhaven Search API] -->|Extract metadata| B[Airflow: extract_metadata]
   B -->|Upsert metadata| C[(Postgres)]
   C -->|Select s3_key IS NULL| D[Airflow: download_and_upload_to_s3]
-  D -->|PutObject (deterministic key)| E[(S3 / MinIO)]
+  D -->|PutObject: deterministic key| E[(S3 / MinIO)]
   D --> F[Airflow: audit_run]
   C --> F
   F -->|Insert/Upsert run metrics| C
@@ -133,4 +133,3 @@ docker compose run --rm minio-init mc ls local/$BUCKET_NAME
 - Store images in a curated zone (parquet + manifest) and version metadata
 - Add CI (lint + unit tests + docker compose smoke test)
 - Add a small "dead-letter" table for persistent failures and reprocessing tooling
-

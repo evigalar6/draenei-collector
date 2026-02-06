@@ -1,99 +1,136 @@
 # draenei-collector
 
-![Airflow](https://img.shields.io/badge/Orchestration-Apache%20Airflow-blue)
-![Docker](https://img.shields.io/badge/Containerization-Docker-2496ED)
-![AWS](https://img.shields.io/badge/Cloud-AWS%20S3-orange)
-![Python](https://img.shields.io/badge/Language-Python-yellow)
+An end-to-end, beginner-friendly data ingestion pipeline (Airflow + Postgres + S3) that scrapes wallpaper metadata from Wallhaven, deduplicates/upserts it into Postgres, downloads the actual images, uploads them to an S3 bucket, and writes a per-run audit record with basic data-quality / run metrics.
 
-A small, portfolio ETL project that uses Apache Airflow to:
-1) scrape wallpaper metadata from the Wallhaven API,
-2) load metadata into Postgres for deduplication and tracking,
-3) download images and upload them to an S3 bucket.
-
-This is a learning project. It is not production-hardened.
-
-## What The ETL Does
+## Architecture
 
 ```mermaid
-graph LR
-    A[Wallhaven Search API] -->|Extract metadata| B(Airflow task: scraper)
-    B -->|Load metadata| C[(PostgreSQL)]
-    C -->|Select pending rows| D(Airflow task: downloader/uploader)
-    D -->|Upload objects| E[AWS S3 bucket]
+flowchart LR
+  A[Wallhaven Search API] -->|Extract metadata| B[Airflow: extract_metadata]
+  B -->|Upsert metadata| C[(Postgres)]
+  C -->|Select s3_key IS NULL| D[Airflow: download_and_upload_to_s3]
+  D -->|PutObject (deterministic key)| E[(S3 / MinIO)]
+  D --> F[Airflow: audit_run]
+  C --> F
+  F -->|Insert/Upsert run metrics| C
 ```
 
-### Extract (Wallhaven -> Python)
-- Source: `https://wallhaven.cc/api/v1/search`
-- The scraper requests SFW results (`purity=100`) and sorts by `date_added` descending.
-- It extracts a small set of fields per item (id/path/resolution/category/purity/file_size).
-- Incremental logic: none. Each run chooses a random page in a small range and scrapes a bounded number of results.
-- Failure mode: on request/API errors, the scraper returns an empty list and the downstream load task becomes a no-op.
+## Quickstart (One Command)
 
-### Load (Python -> Postgres)
-- Destination table: `draenei_content.wallpapers`
-- The loader inserts the extracted metadata into Postgres.
-- Idempotency:
-  - Inserts use `ON CONFLICT (wallhaven_id) DO NOTHING`, so reruns do not duplicate metadata.
-- Assumptions:
-  - A unique constraint exists on `wallhaven_id`.
-  - The table contains at least the columns referenced by the code: `wallhaven_id`, `url`, `resolution`, `category`, `purity`, `file_size`.
+Prereqs: Docker + Docker Compose
 
-### Download + Upload (Postgres -> S3, then Postgres update)
-- Source: rows from `draenei_content.wallpapers` where `s3_key IS NULL`, limited to a small batch per run.
-- Transform:
-  - Downloads the image URL into memory.
-  - Derives an S3 key as `wallpapers/{wallhaven_id}.{ext}` (with a default extension fallback).
-- Destination:
-  - Uploads the bytes to S3 using `put_object`.
-  - Updates Postgres with the `s3_key` and `updated_at` for each successfully uploaded row.
-- Idempotency:
-  - Rows with a non-null `s3_key` are skipped, so reruns are safe for already-uploaded items.
-- Failure modes:
-  - Download errors and S3 errors are handled per-row; the task continues to the next item.
-
-## Repository Layout
-- `dags/draenei_etl_dag.py`: Airflow DAG wiring and scheduling.
-- `plugins/collector/`: scraping and database load tasks.
-- `plugins/uploader/`: S3 upload helpers and the download/upload task.
-
-## Running Locally (Docker Compose)
-
-### Prerequisites
-- Docker and Docker Compose
-- An S3 bucket you control
-- AWS credentials with least-privilege access to that bucket
-
-### Environment Variables
-Create a `.env` file in the repository root (do not commit it):
-```ini
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_DEFAULT_REGION=us-east-1
-BUCKET_NAME=your-bucket-name
+```bash
+docker compose up --build
 ```
+
+What you get locally:
+- Airflow UI on `http://localhost:8080` (user: `admin`, password: `admin`)
+- Postgres on `localhost:5435` (user: `airflow`, password: `airflow`, db: `airflow`)
+- Local S3-compatible object storage (MinIO):
+  - API: `http://localhost:9000`
+  - Console: `http://localhost:9001` (user/pass are from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, default `minioadmin` / `minioadmin`)
 
 Notes:
-- The code loads environment variables via `python-dotenv` and standard process environment.
-- Do not use long-lived admin keys. Prefer a dedicated IAM user/role scoped to a single bucket/prefix.
+- Postgres schema bootstrap runs automatically on first start via `sql/001_create_tables.sql`.
+- If you want a clean reset (re-run SQL init scripts), use:
+  ```bash
+  docker compose down -v
+  docker compose up --build
+  ```
 
-### Start Services
+## Environment Variables
+
+Copy `.env.example` to `.env` to override defaults (no secrets are committed).
+
+Variables:
+- `BUCKET_NAME`: bucket to write images to
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`: used by `boto3`
+- `S3_ENDPOINT_URL`: if set, `boto3` uses this endpoint (default points to local MinIO)
+- `S3_FORCE_PATH_STYLE`: set `true` for MinIO compatibility
+- `UPLOAD_BATCH_LIMIT`: max images uploaded per DAG run
+
+To use real AWS S3:
+- Set `S3_ENDPOINT_URL=` (empty / unset)
+- Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`, `BUCKET_NAME` to your real AWS values
+
+## How To Verify Success
+
+### 1) Trigger a DAG run
+1. Open Airflow: `http://localhost:8080` (admin/admin)
+2. Find DAG `draenei_content_loader_v4_clean`
+3. Trigger it (or wait for the `@daily` schedule)
+
+### 2) Check Postgres rows
+Connect:
 ```bash
-docker-compose up -d
+docker compose exec postgres psql -U airflow -d airflow
 ```
 
-### Access
-- Airflow UI: `http://localhost:8080` (user: `admin`, password: `admin`)
-- Postgres: `localhost:5435` (user: `airflow`, password: `airflow`)
+Run:
+```sql
+-- metadata is upserted/deduped by wallhaven_id
+SELECT COUNT(*) FROM draenei_content.wallpapers;
 
-## Security Notes
-- Credentials are not hard-coded. They are read from environment variables.
-- Treat `.env` as sensitive and keep it out of version control.
-- Use least-privilege AWS permissions:
-  - Restrict access to the target bucket and (ideally) a prefix like `wallpapers/`.
-  - Disable public bucket access unless you explicitly intend it.
-- Avoid logging secrets. This project prints status messages only; it does not print AWS keys.
+-- images still pending upload
+SELECT COUNT(*) FROM draenei_content.wallpapers WHERE s3_key IS NULL;
 
-## Operational Notes And Limitations
-- This pipeline uses small batch limits to keep each run bounded.
-- It uses `print(...)` rather than structured logging.
-- There is no migration tool in this repository; the Postgres schema/table must exist with the columns used by the tasks.
+-- run-level audit record (one row per Airflow run)
+SELECT
+  dag_id,
+  run_id,
+  metadata_inserted,
+  metadata_updated,
+  images_uploaded,
+  download_failures,
+  upload_failures,
+  missing_s3_after_run,
+  duration_seconds,
+  ended_at
+FROM draenei_content.run_audit
+ORDER BY ended_at DESC
+LIMIT 5;
+```
+
+### 3) Check objects in S3 (MinIO)
+Option A: MinIO console `http://localhost:9001` and browse bucket `BUCKET_NAME` (default `draenei-collector`).
+
+Option B: Use `mc` in the `minio-init` container:
+```bash
+docker compose run --rm minio-init mc ls local/$BUCKET_NAME
+```
+
+## Data Engineering Notes (Idempotency, Quality, Observability)
+
+### Idempotency
+- Postgres upsert: `draenei_content.wallpapers` is keyed by `wallhaven_id` (unique index), and loads use `ON CONFLICT ... DO UPDATE`.
+- S3 keys are deterministic: `wallpapers/{wallhaven_id}.{ext}`.
+  - If the object already exists at that key, the upload task treats it as success and updates Postgres.
+
+### Basic Data Quality Checks
+- Loader drops invalid items missing `wallhaven_id` or `url` and reports `invalid` count in logs and XCom.
+- Audit task records `missing_s3_after_run` so you can quickly see backlog.
+
+### Minimal Observability
+- Each task logs a concise summary with a `[draenei]` prefix.
+- `audit_run` writes one row per Airflow run into `draenei_content.run_audit`.
+
+## Troubleshooting
+
+- Airflow UI login:
+  - Default is `admin` / `admin` (created by the `airflow-init` service).
+- "Tables do not exist" in Postgres:
+  - The init scripts only run on the first time the Postgres volume is created.
+  - Reset with `docker compose down -v` and restart.
+- S3/MinIO permission errors:
+  - Make sure `BUCKET_NAME` matches what MinIO created.
+  - For AWS S3, ensure IAM permissions allow `s3:PutObject`, `s3:GetObject`, and optionally `s3:HeadObject` for the bucket/prefix.
+- Wallhaven API rate limiting / transient errors:
+  - The scraper uses basic retries/backoff; runs may still return 0 items if the API is unavailable.
+
+## Future Improvements (Intentional Next Steps)
+
+- dbt models for curated tables + tests (unique/not_null) on top of the raw ingestion table
+- Store images in a curated zone (parquet + manifest) and version metadata
+- Add CI (lint + unit tests + docker compose smoke test)
+- Add a small "dead-letter" table for persistent failures and reprocessing tooling
+

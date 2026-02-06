@@ -3,9 +3,32 @@
 This module fetches a small set of fields used by downstream loaders.
 """
 
+import logging
 import requests
 from typing import List, Dict, Any
 import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
+
+
+def _http_session() -> requests.Session:
+    # Lightweight retries/backoff for transient errors.
+    retry = Retry(
+        total=4,
+        connect=4,
+        read=4,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s = requests.Session()
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
 
 
 def scrape_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> List[Dict[str, Any]]:
@@ -34,10 +57,11 @@ def scrape_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> L
         "apikey": ""
     }
 
-    print(f"Performing search based on: '{query}'...")
+    logger.info("[draenei] Wallhaven search query=%s page=%s limit=%s", query, page, limit)
 
     try:
-        response = requests.get(base_url, params=params, timeout=10)
+        session = _http_session()
+        response = session.get(base_url, params=params, timeout=15)
         response.raise_for_status()
 
         data_json = response.json()
@@ -58,11 +82,11 @@ def scrape_metadata(query: str = "draenei", limit: int = 10, page: int = 1) -> L
             }
             metadata_list.append(image_data)
 
-        print(f"Received metadata for {len(metadata_list)} pictures.")
+        logger.info("[draenei] Wallhaven returned %s items (using %s)", len(results), len(metadata_list))
         return metadata_list
 
     except requests.exceptions.RequestException as e:
-        print(f"API error: {e}")
+        logger.exception("[draenei] Wallhaven API error: %s", e)
         return []
 
 
@@ -74,7 +98,7 @@ def scrape_random_batch(**kwargs):
     """
     # Keep pagination bounded to reduce API load and runtime variance.
     random_page = random.randint(1, 2)
-    print(f"Scraping page {random_page}.")
+    logger.info("[draenei] Scraping random page=%s", random_page)
 
     return scrape_metadata(query="draenei", limit=5, page=random_page)
 

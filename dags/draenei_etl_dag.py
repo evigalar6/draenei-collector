@@ -17,12 +17,15 @@ from datetime import timedelta
 from collector.scraper import scrape_random_batch
 from collector.db_loader import load_metadata_to_db
 from uploader.pipeline import download_and_upload_images
+from audit.run_audit import write_run_audit
 
 # Default task arguments.
 default_args = {
     'owner': 'evi',
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
+    'retry_exponential_backoff': True,
+    'max_retry_delay': timedelta(minutes=30),
 }
 
 with DAG(
@@ -54,5 +57,11 @@ with DAG(
         python_callable=download_and_upload_images,
     )
 
+    # 4) Write run-level audit metrics to Postgres
+    task_audit = PythonOperator(
+        task_id='audit_run',
+        python_callable=write_run_audit,
+    )
+
     # Dependency chain.
-    task_extract >> task_load_db >> task_upload_s3
+    task_extract >> task_load_db >> task_upload_s3 >> task_audit

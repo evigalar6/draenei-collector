@@ -1,8 +1,12 @@
 """Download images referenced in Postgres and upload them to S3."""
 
+import logging
+import os
 import time
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from uploader.s3_manager import S3Manager
+
+logger = logging.getLogger(__name__)
 
 
 def download_and_upload_images():
@@ -30,33 +34,63 @@ def download_and_upload_images():
     pg_hook = PostgresHook(postgres_conn_id='postgres_default')
 
     # Limit batch size to keep each run bounded.
-    records = pg_hook.get_records("""
-        SELECT id, url, wallhaven_id FROM draenei_content.wallpapers 
+    batch_limit = int(os.getenv("UPLOAD_BATCH_LIMIT", "5"))
+
+    records = pg_hook.get_records(f"""
+        SELECT id, url, wallhaven_id
+        FROM draenei_content.wallpapers
         WHERE s3_key IS NULL
-        LIMIT 5;
+        LIMIT {batch_limit};
     """)
 
-    print(f"Found {len(records)} images pending upload.")
+    logger.info("[draenei] Found %s images pending upload (limit=%s).", len(records), batch_limit)
+
+    uploaded = 0
+    download_failures = 0
+    upload_failures = 0
+    started = time.monotonic()
 
     for row in records:
         db_id, image_url, wall_id = row
-        print(f"Downloading id={db_id} url={image_url}")
+        logger.info("[draenei] Downloading id=%s url=%s", db_id, image_url)
 
         file_bytes = manager.download_image_as_bytes(image_url)
 
-        if file_bytes:
-            ext = image_url.split('.')[-1] if '.' in image_url else 'jpg'
-            s3_key = f"wallpapers/{wall_id}.{ext}"
+        if not file_bytes:
+            download_failures += 1
+            continue
 
-            if manager.upload_file(file_bytes, s3_key):
-                sql_update = """
-                    UPDATE draenei_content.wallpapers 
-                    SET s3_key = %s, updated_at = NOW() 
-                    WHERE id = %s;
-                """
-                pg_hook.run(sql_update, parameters=(s3_key, db_id))
-                print(f"Updated database for id={db_id}.")
-            else:
-                print(f"Failed to upload to S3 for id={db_id}.")
+        ext = image_url.split('.')[-1] if '.' in image_url else 'jpg'
+        ext = ext.split("?")[0].lower()
+        s3_key = f"wallpapers/{wall_id}.{ext}"
+
+        if manager.upload_file(file_bytes, s3_key):
+            sql_update = """
+                UPDATE draenei_content.wallpapers
+                SET s3_key = %s, updated_at = NOW()
+                WHERE id = %s;
+            """
+            pg_hook.run(sql_update, parameters=(s3_key, db_id))
+            uploaded += 1
+            logger.info("[draenei] Updated Postgres id=%s s3_key=%s", db_id, s3_key)
+        else:
+            upload_failures += 1
+            logger.warning("[draenei] Failed S3 upload id=%s key=%s", db_id, s3_key)
 
         time.sleep(1)
+
+    duration_s = int(time.monotonic() - started)
+    logger.info(
+        "[draenei] Upload task summary uploaded=%s download_failures=%s upload_failures=%s duration_s=%s",
+        uploaded,
+        download_failures,
+        upload_failures,
+        duration_s,
+    )
+
+    return {
+        "images_uploaded": uploaded,
+        "download_failures": download_failures,
+        "upload_failures": upload_failures,
+        "duration_s": duration_s,
+    }

@@ -28,7 +28,7 @@ What you get locally:
 - Postgres on `localhost:5435` (user: `airflow`, password: `airflow`, db: `airflow`)
 - Local S3-compatible object storage (MinIO):
   - API: `http://localhost:9000`
-  - Console: `http://localhost:9001` (user/pass are from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, default `minioadmin` / `minioadmin`)
+  - Console: `http://localhost:9001` (user/pass are from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, default `minioadmin` / `minioadmin`(for local demo only!))
 
 Notes:
 - Postgres schema bootstrap runs automatically on first start via `sql/001_create_tables.sql`.
